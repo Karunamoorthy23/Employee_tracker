@@ -1,0 +1,33 @@
+{
+  "name": "proeduvate-employee-progress-portal",
+  "version": "1.0.0",
+  "description": "Employee Progress Tracking Portal for Proeduvate",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:clean": "start-server.bat",
+    "stop": "stop-server.bat",
+    "dev": "nodemon server.js",
+    "restart": "npm run stop && timeout /t 2 /nobreak >nul && npm start"
+  },
+  "keywords": [
+    "employee",
+    "progress",
+    "tracking",
+    "portal",
+    "proeduvate"
+  ],
+  "author": "Proeduvate",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.18.2",
+    "mongoose": "^8.0.3",
+    "multer": "^1.4.5-lts.1",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
