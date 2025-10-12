@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
 
 console.log('🚀 Proeduvate Employee Progress Portal Setup');
 console.log('==========================================\n');
@@ -62,8 +63,10 @@ exec('mongod --version', (error, stdout, stderr) => {
     console.log('   npm start\n');
     
     console.log('4. Access the application:');
-    console.log('   Employee Form: http://localhost:3001');
-    console.log('   Admin Dashboard: http://localhost:3001/admin\n');
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3001/';
+    const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+    console.log(`   Employee Form: ${cleanBaseUrl}`);
+    console.log(`   Admin Dashboard: ${cleanBaseUrl}/admin\n`);
     
     console.log('🎉 Setup complete! Follow the instructions above to start the application.');
 });

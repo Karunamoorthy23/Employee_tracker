@@ -9,11 +9,12 @@ const fs = require('fs');
 const EmployeeProgress = require('./models/EmployeeProgress');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT;
+const BASE_URL = process.env.BASE_URL;
 
 // Middleware
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['http://localhost:3001'],
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [BASE_URL.replace(/\/$/, '')],
   credentials: true
 };
 app.use(cors(corsOptions));
@@ -81,6 +82,13 @@ app.get('/', (req, res) => {
 
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+// API endpoint to get BASE_URL for client-side
+app.get('/api/config', (req, res) => {
+  res.json({
+    BASE_URL: BASE_URL
+  });
 });
 
 // API Routes
@@ -304,7 +312,8 @@ app.use((req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-  console.log(`Employee form: http://localhost:${PORT}`);
-  console.log(`Admin dashboard: http://localhost:${PORT}/admin`);
+  const baseUrl = BASE_URL.replace(/\/$/, '');
+  console.log(`Server is running on ${baseUrl}`);
+  console.log(`Employee form: ${baseUrl}`);
+  console.log(`Admin dashboard: ${baseUrl}/admin`);
 });

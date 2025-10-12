@@ -1,3 +1,6 @@
+// Global variables
+let BASE_URL = '';
+
 // DOM Elements
 const form = document.getElementById('progressForm');
 const submitBtn = document.getElementById('submitBtn');
@@ -8,8 +11,18 @@ const errorText = document.getElementById('errorText');
 const fileInput = document.getElementById('fileAttachment');
 const filePreview = document.getElementById('filePreview');
 
-// Set current date
-document.addEventListener('DOMContentLoaded', function() {
+// Initialize BASE_URL and set current date
+document.addEventListener('DOMContentLoaded', async function() {
+    // Fetch BASE_URL from server
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        BASE_URL = config.BASE_URL;
+    } catch (error) {
+        console.error('Failed to fetch BASE_URL, using default:', error);
+        BASE_URL = window.location.origin + '/';
+    }
+    
     const now = new Date();
     const dateInput = document.getElementById('date');
     
@@ -225,7 +238,7 @@ form.addEventListener('submit', async function(e) {
         console.log('FormData files count:', formDataFiles.length);
         console.log('FormData file names:', formDataFiles.map(f => f.name));
         
-        const response = await fetch('/api/employee-progress', {
+        const response = await fetch(`${BASE_URL}api/employee-progress`, {
             method: 'POST',
             body: formData
         });

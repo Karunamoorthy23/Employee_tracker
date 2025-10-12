@@ -1,4 +1,5 @@
 // Global variables
+let BASE_URL = '';
 let currentPage = 1;
 let currentFilters = {
     search: '',
@@ -46,7 +47,17 @@ const inProgressTasksEl = document.getElementById('inProgressTasks');
 const pendingTasksEl = document.getElementById('pendingTasks');
 
 // Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    // Fetch BASE_URL from server
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        BASE_URL = config.BASE_URL;
+    } catch (error) {
+        console.error('Failed to fetch BASE_URL, using default:', error);
+        BASE_URL = window.location.origin + '/';
+    }
+    
     // Debug: Check if elements exist
     console.log('Custom date groups found:', {
         customDateGroup: !!customDateGroup,
@@ -158,7 +169,7 @@ async function loadSubmissions() {
         showLoading(true);
         hideError();
         
-        const response = await fetch('/api/employee-progress');
+        const response = await fetch(`${BASE_URL}api/employee-progress`);
         const result = await response.json();
         
         if (result.success) {
@@ -488,7 +499,7 @@ function changePage(page) {
 // View submission details
 async function viewSubmission(id) {
     try {
-        const response = await fetch(`/api/employee-progress/${id}`);
+        const response = await fetch(`${BASE_URL}api/employee-progress/${id}`);
         const result = await response.json();
         
         if (result.success) {

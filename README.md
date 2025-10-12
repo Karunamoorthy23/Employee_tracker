@@ -76,8 +76,8 @@ npm start
 ```
 
 ### 6. Access the Application
-- **Employee Form**: http://localhost:3001
-- **Admin Dashboard**: http://localhost:3001/admin
+- **Employee Form**: http://localhost:3001 (or your configured BASE_URL)
+- **Admin Dashboard**: http://localhost:3001/admin (or your configured BASE_URL/admin)
 
 ## 📁 Project Structure
 
@@ -105,8 +105,11 @@ You can customize the application by setting these environment variables:
 
 ```bash
 PORT=3001                           # Server port (default: 3001)
+BASE_URL=http://localhost:3001/     # Base URL for the application (default: http://localhost:3001/)
 MONGODB_URI=mongodb://localhost:27017/Proeduvate  # MongoDB connection string
 ```
+
+**Note**: Create a `.env` file in the project root to set these variables. The application will automatically load them on startup.
 
 ### File Upload Settings
 - **Maximum file size**: 10MB
