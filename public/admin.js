@@ -169,7 +169,9 @@ async function loadSubmissions() {
         showLoading(true);
         hideError();
         
-        const response = await fetch(`${BASE_URL}api/employee-progress`);
+        const response = await fetch(`${BASE_URL}api/employee-progress`, {
+            credentials: 'include'
+        });
         const result = await response.json();
         
         if (result.success) {
@@ -499,7 +501,9 @@ function changePage(page) {
 // View submission details
 async function viewSubmission(id) {
     try {
-        const response = await fetch(`${BASE_URL}api/employee-progress/${id}`);
+        const response = await fetch(`${BASE_URL}api/employee-progress/${id}`, {
+            credentials: 'include'
+        });
         const result = await response.json();
         
         if (result.success) {
@@ -522,7 +526,7 @@ function displaySubmissionModal(submission) {
         fileHTML = `
             <div class="file-attachment">
                 <div class="file-preview">
-                    ${fileAttachments.map(file => getFilePreview(file)).join('')}
+                    ${fileAttachments.map(file => getFilePreview(file, submission._id)).join('')}
                 </div>
             </div>
         `;
@@ -693,7 +697,7 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function getFilePreview(fileAttachment) {
+function getFilePreview(fileAttachment, submissionId) {
     const mimeType = fileAttachment.mimeType;
     const filePath = `/uploads/${fileAttachment.fileName}`;
     const fileIcon = getFileIcon(mimeType);
@@ -719,6 +723,10 @@ function getFilePreview(fileAttachment) {
                     <i class="fas fa-download"></i>
                     Download
                 </a>
+                <button onclick="deleteFile('${submissionId}', '${fileAttachment.fileName}')" class="btn-delete">
+                    <i class="fas fa-trash"></i>
+                    Delete
+                </button>
             </div>
         </div>
     `;
@@ -736,4 +744,60 @@ function showError(message) {
 
 function hideError() {
     errorMessage.style.display = 'none';
+}
+
+// Delete file function
+async function deleteFile(submissionId, fileName) {
+    if (!confirm('Are you sure you want to delete this file? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${BASE_URL}api/employee-progress/${submissionId}/files/${fileName}`, {
+            credentials: 'include',
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Refresh the modal to show updated file list
+            await viewSubmission(submissionId);
+            showSuccess('File deleted successfully');
+        } else {
+            showError(result.message || 'Failed to delete file');
+        }
+    } catch (error) {
+        console.error('Error deleting file:', error);
+        showError('Network error. Please try again.');
+    }
+}
+
+// Show success message
+function showSuccess(message) {
+    // Create a temporary success message
+    const successDiv = document.createElement('div');
+    successDiv.className = 'success-message';
+    successDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #10B981;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        z-index: 10000;
+        font-weight: 500;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    `;
+    successDiv.innerHTML = `<i class="fas fa-check-circle" style="margin-right: 8px;"></i>${message}`;
+    
+    document.body.appendChild(successDiv);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        if (successDiv.parentNode) {
+            successDiv.parentNode.removeChild(successDiv);
+        }
+    }, 3000);
 }

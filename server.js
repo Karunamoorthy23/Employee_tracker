@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const cors = require('cors');
 const fs = require('fs');
+const session = require('express-session');
 
 const EmployeeProgress = require('./models/EmployeeProgress');
 
@@ -20,6 +21,19 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'proeduvate-secret-key-2024',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: false, // Set to true in production with HTTPS
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
@@ -127,8 +141,69 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Admin login route
+app.get('/admin-login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin-login.html'));
+});
+
+// Admin login API
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body;
+  
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    req.session.isAuthenticated = true;
+    req.session.adminUser = username;
+    res.json({
+      success: true,
+      message: 'Login successful'
+    });
+  } else {
+    res.status(401).json({
+      success: false,
+      message: 'Invalid credentials'
+    });
+  }
+});
+
+// Admin logout API
+app.post('/api/admin/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: 'Logout failed'
+      });
+    }
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  });
+});
+
+// Check authentication status
+app.get('/api/admin/auth-status', (req, res) => {
+  if (req.session && req.session.isAuthenticated) {
+    res.json({
+      success: true,
+      authenticated: true,
+      user: req.session.adminUser
+    });
+  } else {
+    res.json({
+      success: true,
+      authenticated: false
+    });
+  }
+});
+
+// Protected admin route
 app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  if (req.session && req.session.isAuthenticated) {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  } else {
+    res.redirect('/admin-login');
+  }
 });
 
 // API endpoint to get BASE_URL for client-side
@@ -142,6 +217,22 @@ app.get('/api/config', (req, res) => {
 const checkConnection = () => {
   return mongoose.connection.readyState === 1;
 };
+
+// Authentication middleware
+const requireAuth = (req, res, next) => {
+  if (req.session && req.session.isAuthenticated) {
+    return next();
+  } else {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+  }
+};
+
+// Admin credentials from environment variables
+const ADMIN_USERNAME = process.env.LOGIN_USERNAME || 'Login@proEduvate';
+const ADMIN_PASSWORD = process.env.LOGIN_PASSWORD || 'Pass@proEduvate';
 
 // API Routes
 // Submit employee progress
@@ -239,8 +330,8 @@ app.post('/api/employee-progress', upload.array('fileAttachment', 10), async (re
   }
 });
 
-// Get all employee progress (for admin dashboard)
-app.get('/api/employee-progress', async (req, res) => {
+// Get all employee progress (for admin dashboard) - Protected route
+app.get('/api/employee-progress', requireAuth, async (req, res) => {
   try {
     // Check if MongoDB is connected
     if (!checkConnection()) {
@@ -301,8 +392,8 @@ app.get('/api/employee-progress', async (req, res) => {
   }
 });
 
-// Get single progress entry by ID
-app.get('/api/employee-progress/:id', async (req, res) => {
+// Get single progress entry by ID - Protected route
+app.get('/api/employee-progress/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -329,6 +420,81 @@ app.get('/api/employee-progress/:id', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching progress entry:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error. Please try again later.'
+    });
+  }
+});
+
+// Delete a specific file from a progress entry - Protected route
+app.delete('/api/employee-progress/:id/files/:fileName', requireAuth, async (req, res) => {
+  try {
+    const { id, fileName } = req.params;
+    
+    // Check if MongoDB is connected
+    if (!checkConnection()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection is not available. Please try again later.'
+      });
+    }
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid ID format'
+      });
+    }
+
+    const progressEntry = await EmployeeProgress.findById(id);
+    
+    if (!progressEntry) {
+      return res.status(404).json({
+        success: false,
+        message: 'Progress entry not found'
+      });
+    }
+
+    // Find the file attachment to delete
+    const fileIndex = progressEntry.fileAttachments.findIndex(file => file.fileName === fileName);
+    
+    if (fileIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    const fileToDelete = progressEntry.fileAttachments[fileIndex];
+    const filePath = path.join(__dirname, 'uploads', fileToDelete.fileName);
+
+    // Remove file from filesystem
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`File deleted from filesystem: ${filePath}`);
+      }
+    } catch (fileError) {
+      console.error('Error deleting file from filesystem:', fileError);
+      // Continue with database update even if file deletion fails
+    }
+
+    // Remove file from database
+    progressEntry.fileAttachments.splice(fileIndex, 1);
+    await progressEntry.save();
+
+    res.json({
+      success: true,
+      message: 'File deleted successfully',
+      data: {
+        deletedFile: fileToDelete.originalName,
+        remainingFiles: progressEntry.fileAttachments.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Error deleting file:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error. Please try again later.'
