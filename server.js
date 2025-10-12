@@ -63,16 +63,63 @@ const upload = multer({
 });
 
 // MongoDB connection
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
+let mongoUri;
+if (process.env.MONGODB_URI) {
+  // Use direct MONGODB_URI if provided
+  mongoUri = process.env.MONGODB_URI;
+} else if (process.env.CLUSTERNAME && process.env.USERNAME && process.env.PASSWORD) {
+  // Construct MongoDB URI from individual components
+  const clusterName = process.env.CLUSTERNAME;
+  const username = process.env.USERNAME;
+  const password = process.env.PASSWORD;
+  const provider = process.env.PROVIDER || 'mongodb.net'; // Default to MongoDB Atlas
+  
+  mongoUri = `mongodb+srv://${username}:${password}@${clusterName}.${provider}/Proeduvate?retryWrites=true&w=majority`;
+} else {
+  // Fallback to local MongoDB
+  mongoUri = 'mongodb://localhost:27017/Proeduvate';
+}
+
+// MongoDB connection with minimal options to avoid compatibility issues
+mongoose.connect(mongoUri)
 .then(() => {
   console.log('Connected to MongoDB successfully');
+  console.log(`Database: ${mongoUri.includes('localhost') ? 'Local MongoDB' : 'Cloud MongoDB'}`);
 })
 .catch((error) => {
   console.error('MongoDB connection error:', error);
-  process.exit(1);
+  
+  if (error.name === 'MongooseServerSelectionError') {
+    console.error('\n🔧 Troubleshooting MongoDB Atlas Connection:');
+    console.error('1. Check if your IP address is whitelisted in MongoDB Atlas');
+    console.error('2. Go to: https://cloud.mongodb.com → Network Access → Add IP Address');
+    console.error('3. Add your current IP or use 0.0.0.0/0 for all IPs (development only)');
+    console.error('4. Verify your cluster is running and accessible');
+    console.error('5. Check your username and password are correct');
+  }
+  
+  if (error.message && (error.message.includes('SSL') || error.message.includes('TLS'))) {
+    console.error('\n🔧 SSL/TLS Connection Issues:');
+    console.error('1. Try adding these parameters to your MongoDB URI:');
+    console.error('   ?ssl=true&tlsAllowInvalidCertificates=true&tlsAllowInvalidHostnames=true');
+    console.error('2. Example: mongodb+srv://user:pass@cluster.mongodb.net/db?ssl=true&tlsAllowInvalidCertificates=true');
+    console.error('3. Verify your MongoDB Atlas cluster allows connections from your IP');
+    console.error('4. Ensure your MongoDB user has proper permissions');
+  }
+  
+  if (error.name === 'MongoParseError') {
+    console.error('\n🔧 MongoDB URI Parse Error:');
+    console.error('1. Check your MongoDB connection string format');
+    console.error('2. Ensure all special characters in password are URL encoded');
+    console.error('3. Verify the connection string is properly formatted');
+  }
+  
+  console.error('\n💡 For local development, you can also use local MongoDB:');
+  console.error('   Set MONGODB_URI=mongodb://localhost:27017/Proeduvate in your .env file');
+  
+  // Don't exit immediately, allow server to start and retry connection
+  console.error('\n⚠️  Server will continue running but database operations will fail until connection is established.');
+  console.error('   The server will attempt to reconnect automatically.');
 });
 
 // Routes
@@ -91,10 +138,22 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// Connection status check
+const checkConnection = () => {
+  return mongoose.connection.readyState === 1;
+};
+
 // API Routes
 // Submit employee progress
 app.post('/api/employee-progress', upload.array('fileAttachment', 10), async (req, res) => {
   try {
+    // Check if MongoDB is connected
+    if (!checkConnection()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection is not available. Please try again later.'
+      });
+    }
     const {
       internName,
       internEmail,
@@ -183,6 +242,13 @@ app.post('/api/employee-progress', upload.array('fileAttachment', 10), async (re
 // Get all employee progress (for admin dashboard)
 app.get('/api/employee-progress', async (req, res) => {
   try {
+    // Check if MongoDB is connected
+    if (!checkConnection()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection is not available. Please try again later.'
+      });
+    }
     const { search, domain, techLead, page = 1, limit = 10 } = req.query;
     
     // Build filter object

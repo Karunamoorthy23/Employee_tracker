@@ -51,9 +51,12 @@ cd proeduvate-employee-progress-portal
 npm install
 ```
 
-### 3. Start MongoDB
-Make sure MongoDB is running on your system:
+### 3. Configure MongoDB
+Choose one of the following options:
+
+#### Option A: Local MongoDB
 ```bash
+# Start MongoDB locally
 # On Windows
 mongod
 
@@ -61,6 +64,15 @@ mongod
 sudo systemctl start mongod
 # or
 mongod
+```
+
+#### Option B: Cloud MongoDB (MongoDB Atlas, etc.)
+Create a `.env` file in the project root with your MongoDB credentials:
+```bash
+CLUSTERNAME=your-cluster-name
+USERNAME=your-username
+PASSWORD=your-password
+PROVIDER=mongodb.net  # Optional, defaults to mongodb.net
 ```
 
 ### 4. Create the Database
@@ -104,12 +116,27 @@ proeduvate-employee-progress-portal/
 You can customize the application by setting these environment variables:
 
 ```bash
+# Server Configuration
 PORT=3001                           # Server port (default: 3001)
 BASE_URL=http://localhost:3001/     # Base URL for the application (default: http://localhost:3001/)
-MONGODB_URI=mongodb://localhost:27017/Proeduvate  # MongoDB connection string
+
+# MongoDB Configuration (Choose one option)
+# Option 1: Direct MongoDB URI
+MONGODB_URI=mongodb://localhost:27017/Proeduvate
+
+# Option 2: Cloud MongoDB (MongoDB Atlas, etc.)
+CLUSTERNAME=your-cluster-name
+USERNAME=your-username
+PASSWORD=your-password
+PROVIDER=mongodb.net  # Optional, defaults to mongodb.net for Atlas
 ```
 
 **Note**: Create a `.env` file in the project root to set these variables. The application will automatically load them on startup.
+
+**MongoDB Configuration Options:**
+- **Local MongoDB**: Use `MONGODB_URI=mongodb://localhost:27017/Proeduvate`
+- **Cloud MongoDB**: Use `CLUSTERNAME`, `USERNAME`, `PASSWORD`, and optionally `PROVIDER`
+- **Direct URI**: Use `MONGODB_URI` with your complete connection string
 
 ### File Upload Settings
 - **Maximum file size**: 10MB
