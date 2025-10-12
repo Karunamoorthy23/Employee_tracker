@@ -21,9 +21,6 @@
                 <!-- Center Section - Navigation -->
                 <nav class="navbar-nav">
                     <a href="#" class="nav-link active">Dashboard</a>
-                    <a href="#" class="nav-link">Employees</a>
-                    <a href="#" class="nav-link">Reports</a>
-                    <a href="#" class="nav-link">Settings</a>
                 </nav>
                 
                 <!-- Right Section - User Profile -->
@@ -271,6 +268,78 @@
         </div>
     </div>
 
+    <script>
+        // Authentication check
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/admin/auth-status', {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                
+                if (!data.authenticated) {
+                    window.location.href = '/admin-login';
+                    return;
+                }
+                
+                // Update user info in navbar
+                if (data.user) {
+                    const userNameElement = document.querySelector('.user-name');
+                    if (userNameElement) {
+                        userNameElement.textContent = data.user;
+                    }
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                window.location.href = '/admin-login';
+            }
+        }
+
+        // Logout function
+        async function logout() {
+            try {
+                const response = await fetch('/api/admin/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    window.location.href = '/admin-login';
+                } else {
+                    console.error('Logout failed');
+                }
+            } catch (error) {
+                console.error('Logout error:', error);
+                // Force redirect even if logout fails
+                window.location.href = '/admin-login';
+            }
+        }
+
+        // Add logout functionality to user dropdown
+        function setupLogout() {
+            const userDropdown = document.querySelector('.user-dropdown');
+            const userInfo = document.querySelector('.user-info');
+            
+            if (userDropdown && userInfo) {
+                userInfo.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (confirm('Are you sure you want to logout?')) {
+                        logout();
+                    }
+                });
+                
+                // Add cursor pointer to indicate it's clickable
+                userInfo.style.cursor = 'pointer';
+                userInfo.title = 'Click to logout';
+            }
+        }
+
+        // Initialize authentication check when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
+            setupLogout();
+        });
+    </script>
     <script src="admin.js"></script>
 </body>
 </html>

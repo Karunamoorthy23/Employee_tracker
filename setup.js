@@ -55,9 +55,21 @@ exec('mongod --version', (error, stdout, stderr) => {
     console.log('1. Install dependencies:');
     console.log('   npm install\n');
     
-    console.log('2. Start MongoDB (if not already running):');
-    console.log('   Windows: mongod');
-    console.log('   macOS/Linux: sudo systemctl start mongod\n');
+    console.log('2. Configure MongoDB:');
+    if (process.env.CLUSTERNAME && process.env.USERNAME && process.env.PASSWORD) {
+        console.log('   ✅ Cloud MongoDB configuration detected');
+        console.log(`   Cluster: ${process.env.CLUSTERNAME}`);
+        console.log(`   Provider: ${process.env.PROVIDER || 'mongodb.net'}`);
+    } else if (process.env.MONGODB_URI) {
+        console.log('   ✅ MongoDB URI configuration detected');
+    } else {
+        console.log('   ⚠️  No MongoDB configuration found');
+        console.log('   Please set up MongoDB configuration in your .env file');
+        console.log('   For local MongoDB: Start MongoDB service');
+        console.log('   Windows: mongod');
+        console.log('   macOS/Linux: sudo systemctl start mongod');
+    }
+    console.log('');
     
     console.log('3. Start the application:');
     console.log('   npm start\n');
