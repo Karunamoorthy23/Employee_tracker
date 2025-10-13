@@ -10,8 +10,8 @@ const session = require('express-session');
 const EmployeeProgress = require('./models/EmployeeProgress');
 
 const app = express();
-const PORT = process.env.PORT;
-const BASE_URL = process.env.BASE_URL;
+const PORT = process.env.PORT || 3000;
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 // Middleware
 const corsOptions = {
@@ -543,9 +543,14 @@ app.use((req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  const baseUrl = BASE_URL.replace(/\/$/, '');
-  console.log(`Server is running on ${baseUrl}`);
-  console.log(`Employee form: ${baseUrl}`);
-  console.log(`Admin dashboard: ${baseUrl}/admin`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    const baseUrl = BASE_URL.replace(/\/$/, '');
+    console.log(`Server is running on ${baseUrl}`);
+    console.log(`Employee form: ${baseUrl}`);
+    console.log(`Admin dashboard: ${baseUrl}/admin`);
+  });
+}
+
+// Export for Vercel
+module.exports = app;
