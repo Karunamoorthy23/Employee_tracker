@@ -8,7 +8,9 @@
     "start:clean": "start-server.bat",
     "stop": "stop-server.bat",
     "dev": "nodemon server.js",
-    "restart": "npm run stop && timeout /t 2 /nobreak >nul && npm start"
+    "restart": "npm run stop && timeout /t 2 /nobreak >nul && npm start",
+    "deploy:prepare": "node deploy-prepare.js",
+    "deploy:check": "node deploy-prepare.js"
   },
   "keywords": [
     "employee",

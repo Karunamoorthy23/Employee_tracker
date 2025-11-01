@@ -10,8 +10,13 @@ const session = require('express-session');
 const EmployeeProgress = require('./models/EmployeeProgress');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+const PORT = process.env.PORT || 5000;
+let BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+
+// Ensure localhost URLs always use http, not https
+if (BASE_URL.includes('localhost') || BASE_URL.includes('127.0.0.1')) {
+  BASE_URL = BASE_URL.replace(/^https:/, 'http:');
+}
 
 // Middleware
 const corsOptions = {
@@ -81,6 +86,7 @@ let mongoUri;
 if (process.env.MONGODB_URI) {
   // Use direct MONGODB_URI if provided
   mongoUri = process.env.MONGODB_URI;
+  console.log('🔌 Using MONGODB_URI from environment variables');
 } else if (process.env.CLUSTERNAME && process.env.USERNAME && process.env.PASSWORD) {
   // Construct MongoDB URI from individual components
   const clusterName = process.env.CLUSTERNAME;
@@ -89,10 +95,20 @@ if (process.env.MONGODB_URI) {
   const provider = process.env.PROVIDER || 'mongodb.net'; // Default to MongoDB Atlas
   
   mongoUri = `mongodb+srv://${username}:${password}@${clusterName}.${provider}/Proeduvate?retryWrites=true&w=majority`;
+  console.log('🔌 Using MongoDB Atlas connection (constructed from CLUSTERNAME, USERNAME, PASSWORD)');
+  console.log(`   Cluster: ${clusterName}`);
+  console.log(`   Username: ${username}`);
 } else {
   // Fallback to local MongoDB
   mongoUri = 'mongodb://localhost:27017/Proeduvate';
+  console.log('🔌 Using local MongoDB (fallback)');
+  console.log('   💡 To use MongoDB Atlas, set MONGODB_URI or CLUSTERNAME/USERNAME/PASSWORD in .env');
 }
+
+// Mask password in logs for security
+const maskedUri = mongoUri.replace(/:\/\/[^:]+:([^@]+)@/, '://***:***@');
+console.log(`📡 Attempting to connect to MongoDB...`);
+console.log(`   Connection string: ${maskedUri}`);
 
 // MongoDB connection with minimal options to avoid compatibility issues
 mongoose.connect(mongoUri)
@@ -101,39 +117,65 @@ mongoose.connect(mongoUri)
   console.log(`Database: ${mongoUri.includes('localhost') ? 'Local MongoDB' : 'Cloud MongoDB'}`);
 })
 .catch((error) => {
-  console.error('MongoDB connection error:', error);
+  console.error('\n❌ MongoDB connection error:', error.message);
+  console.error(`   Error type: ${error.name}`);
   
   if (error.name === 'MongooseServerSelectionError') {
-    console.error('\n🔧 Troubleshooting MongoDB Atlas Connection:');
-    console.error('1. Check if your IP address is whitelisted in MongoDB Atlas');
-    console.error('2. Go to: https://cloud.mongodb.com → Network Access → Add IP Address');
-    console.error('3. Add your current IP or use 0.0.0.0/0 for all IPs (development only)');
-    console.error('4. Verify your cluster is running and accessible');
-    console.error('5. Check your username and password are correct');
+    console.error('\n🔴 MOST LIKELY ISSUE: IP Address Not Whitelisted');
+    console.error('\n🔧 Quick Fix Steps:');
+    console.error('   1. Go to: https://cloud.mongodb.com');
+    console.error('   2. Click "Network Access" (left sidebar)');
+    console.error('   3. Click "Add IP Address"');
+    console.error('   4. For development: Add "0.0.0.0/0" (allows all IPs)');
+    console.error('   5. For production: Click "Add Current IP Address"');
+    console.error('   6. Wait 1-2 minutes, then restart your server');
+    console.error('\n   Other possible causes:');
+    console.error('   - Cluster is paused (check MongoDB Atlas dashboard)');
+    console.error('   - Wrong cluster name in connection string');
+    console.error('   - Network/firewall blocking MongoDB connections');
+  }
+  
+  if (error.name === 'MongoAuthenticationError' || error.message.includes('Authentication failed')) {
+    console.error('\n🔴 AUTHENTICATION FAILED');
+    console.error('\n🔧 Check:');
+    console.error('   1. Username is correct (case-sensitive)');
+    console.error('   2. Password is correct');
+    console.error('   3. Password has special characters? URL encode them!');
+    console.error('      @ → %40, # → %23, % → %25, & → %26');
+    console.error('   4. Database user exists in MongoDB Atlas → Database Access');
+  }
+  
+  if (error.name === 'MongoParseError' || error.message.includes('parse')) {
+    console.error('\n🔴 CONNECTION STRING FORMAT ERROR');
+    console.error('\n🔧 Fix:');
+    console.error('   1. Check your MONGODB_URI format');
+    console.error('   2. Ensure special characters in password are URL encoded');
+    console.error('   3. Format: mongodb+srv://USERNAME:PASSWORD@CLUSTER.mongodb.net/DBNAME');
+    console.error('\n   Get correct connection string:');
+    console.error('   - MongoDB Atlas → Connect → Connect your application → Copy string');
   }
   
   if (error.message && (error.message.includes('SSL') || error.message.includes('TLS'))) {
-    console.error('\n🔧 SSL/TLS Connection Issues:');
-    console.error('1. Try adding these parameters to your MongoDB URI:');
+    console.error('\n🔴 SSL/TLS CONNECTION ISSUE');
+    console.error('\n🔧 Try adding to your connection string:');
     console.error('   ?ssl=true&tlsAllowInvalidCertificates=true&tlsAllowInvalidHostnames=true');
-    console.error('2. Example: mongodb+srv://user:pass@cluster.mongodb.net/db?ssl=true&tlsAllowInvalidCertificates=true');
-    console.error('3. Verify your MongoDB Atlas cluster allows connections from your IP');
-    console.error('4. Ensure your MongoDB user has proper permissions');
   }
   
-  if (error.name === 'MongoParseError') {
-    console.error('\n🔧 MongoDB URI Parse Error:');
-    console.error('1. Check your MongoDB connection string format');
-    console.error('2. Ensure all special characters in password are URL encoded');
-    console.error('3. Verify the connection string is properly formatted');
+  if (error.message && error.message.includes('timeout')) {
+    console.error('\n🔴 CONNECTION TIMEOUT');
+    console.error('\n🔧 Possible causes:');
+    console.error('   1. Cluster is paused - Resume it in MongoDB Atlas');
+    console.error('   2. Network/firewall blocking connection');
+    console.error('   3. IP not whitelisted');
   }
   
-  console.error('\n💡 For local development, you can also use local MongoDB:');
-  console.error('   Set MONGODB_URI=mongodb://localhost:27017/Proeduvate in your .env file');
+  console.error('\n📚 For detailed troubleshooting, see: MONGODB_TROUBLESHOOTING.md');
+  console.error('\n💡 Temporary workaround: Use local MongoDB');
+  console.error('   Set in .env: MONGODB_URI=mongodb://localhost:27017/Proeduvate');
   
   // Don't exit immediately, allow server to start and retry connection
   console.error('\n⚠️  Server will continue running but database operations will fail until connection is established.');
-  console.error('   The server will attempt to reconnect automatically.');
+  console.error('   Mongoose will attempt to reconnect automatically when connection is available.');
 });
 
 // Routes
@@ -208,8 +250,15 @@ app.get('/admin', (req, res) => {
 
 // API endpoint to get BASE_URL for client-side
 app.get('/api/config', (req, res) => {
+  // Fix localhost URLs - always use http, not https
+  let baseUrl = BASE_URL;
+  if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
+    baseUrl = baseUrl.replace(/^https:/, 'http:');
+  }
+  // Ensure BASE_URL ends with a trailing slash
+  baseUrl = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
   res.json({
-    BASE_URL: BASE_URL
+    BASE_URL: baseUrl
   });
 });
 
@@ -543,14 +592,9 @@ app.use((req, res) => {
 });
 
 // Start server
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    const baseUrl = BASE_URL.replace(/\/$/, '');
-    console.log(`Server is running on ${baseUrl}`);
-    console.log(`Employee form: ${baseUrl}`);
-    console.log(`Admin dashboard: ${baseUrl}/admin`);
-  });
-}
-
-// Export for Vercel
-module.exports = app;
+app.listen(PORT, () => {
+  const baseUrl = BASE_URL.replace(/\/$/, '');
+  console.log(`Server is running on ${baseUrl}`);
+  console.log(`Employee form: ${baseUrl}`);
+  console.log(`Admin dashboard: ${baseUrl}/admin`);
+});

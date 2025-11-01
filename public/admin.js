@@ -53,6 +53,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         const response = await fetch('/api/config');
         const config = await response.json();
         BASE_URL = config.BASE_URL;
+        // Ensure BASE_URL ends with a trailing slash
+        if (!BASE_URL.endsWith('/')) {
+            BASE_URL += '/';
+        }
     } catch (error) {
         console.error('Failed to fetch BASE_URL, using default:', error);
         BASE_URL = window.location.origin + '/';
