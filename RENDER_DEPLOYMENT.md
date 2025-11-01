@@ -34,12 +34,14 @@
    ```
    Name: proeduvate
    Region: Choose closest to you
-   Branch: main
+   Branch: portal/karuna_1st_update (or main/master)
    Root Directory: . (leave empty)
    Runtime: Node
    Build Command: npm install
    Start Command: npm start
    ```
+   
+   ⚠️ **IMPORTANT:** Make sure Build Command is EXACTLY `npm install` (NOT `npm install -r requirements.txt`)
 
 ### Step 4: Set Environment Variables
 

@@ -19,9 +19,67 @@ if (BASE_URL.includes('localhost') || BASE_URL.includes('127.0.0.1')) {
 }
 
 // Middleware
+// CORS configuration - allow multiple origins for Render deployments
+const getAllowedOrigins = () => {
+  if (process.env.ALLOWED_ORIGINS) {
+    const origins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
+    // Always include BASE_URL even if in ALLOWED_ORIGINS
+    const baseUrl = BASE_URL.replace(/\/$/, '');
+    if (!origins.includes(baseUrl)) {
+      origins.push(baseUrl);
+    }
+    return origins;
+  }
+  
+  // Default: allow BASE_URL
+  return [BASE_URL.replace(/\/$/, '')];
+};
+
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [BASE_URL.replace(/\/$/, '')],
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, or same-origin)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    const allowedOrigins = getAllowedOrigins();
+    const baseUrlOrigin = BASE_URL.replace(/\/$/, '').replace(/^https?:\/\//, '');
+    
+    // Allow if origin matches BASE_URL (same domain)
+    if (origin.includes(baseUrlOrigin)) {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list (exact match)
+    const isAllowed = allowedOrigins.some(allowed => {
+      const allowedClean = allowed.replace(/\/$/, '').replace(/^https?:\/\//, '');
+      const originClean = origin.replace(/\/$/, '').replace(/^https?:\/\//, '');
+      
+      // Exact match
+      if (origin === allowed || originClean === allowedClean) {
+        return true;
+      }
+      
+      // Allow all Render subdomains in production
+      if (process.env.NODE_ENV === 'production' && 
+          origin.includes('onrender.com') && 
+          allowed.includes('onrender.com')) {
+        return true;
+      }
+      
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn(`⚠️ CORS: Blocked origin "${origin}". Allowed origins: ${allowedOrigins.join(', ')}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 };
 app.use(cors(corsOptions));
 app.use(express.json());

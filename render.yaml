@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: proeduvate
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+    # Add your other environment variables in Render dashboard:
+    # BASE_URL=https://proeduvate.onrender.com
+    # MONGODB_URI=your-mongodb-connection-string
+    # LOGIN_USERNAME=Login@proEduvate
+    # LOGIN_PASSWORD=Pass@proEduvate
+    # SESSION_SECRET=your-session-secret
+    # ALLOWED_ORIGINS=https://proeduvate.onrender.com
+
