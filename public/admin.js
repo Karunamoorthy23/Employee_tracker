@@ -173,7 +173,8 @@ async function loadSubmissions() {
         showLoading(true);
         hideError();
         
-        const response = await fetch(`${BASE_URL}api/employee-progress`, {
+        // Fetch all records by passing limit=all
+        const response = await fetch(`${BASE_URL}api/employee-progress?limit=all`, {
             credentials: 'include'
         });
         const result = await response.json();

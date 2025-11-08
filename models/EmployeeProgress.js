@@ -20,7 +20,7 @@ const employeeProgressSchema = new mongoose.Schema({
   internDomain: {
     type: String,
     required: true,
-    enum: ['Full Stack', 'Frontend', 'Backend', 'AIML', 'Database Management', 'Cloud Technologies', 'Cyber Security', 'Data Engineering', 'Data Visualization', 'Testing', 'Others']
+    enum: ['Full Stack', 'Frontend', 'Backend', 'AIML', 'Product Developer', 'Human Resource Management', 'Database Management', 'Cloud Technologies', 'Cyber Security', 'Data Engineering', 'Data Visualization', 'Testing', 'Others']
   },
   date: {
     type: Date,

@@ -468,26 +468,58 @@ app.get('/api/employee-progress', requireAuth, async (req, res) => {
       filter.techLeadName = techLead;
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    // Handle 'all' limit to fetch all records
+    let queryLimit;
+    let skip;
+    if (limit === 'all' || limit === 'All') {
+      queryLimit = null; // No limit
+      skip = 0; // No pagination when fetching all
+    } else {
+      queryLimit = parseInt(limit);
+      skip = (parseInt(page) - 1) * queryLimit;
+    }
     
-    const progressEntries = await EmployeeProgress.find(filter)
+    let query = EmployeeProgress.find(filter)
       .sort({ submissionTimestamp: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
       .select('-__v');
+    
+    if (skip > 0) {
+      query = query.skip(skip);
+    }
+    
+    if (queryLimit) {
+      query = query.limit(queryLimit);
+    }
+    
+    const progressEntries = await query;
 
     const totalCount = await EmployeeProgress.countDocuments(filter);
+
+    // Calculate pagination info
+    let paginationInfo;
+    if (limit === 'all' || limit === 'All') {
+      paginationInfo = {
+        currentPage: 1,
+        totalPages: 1,
+        totalCount,
+        hasNext: false,
+        hasPrev: false
+      };
+    } else {
+      const limitNum = parseInt(limit);
+      paginationInfo = {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalCount / limitNum),
+        totalCount,
+        hasNext: skip + progressEntries.length < totalCount,
+        hasPrev: parseInt(page) > 1
+      };
+    }
 
     res.json({
       success: true,
       data: progressEntries,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalCount / parseInt(limit)),
-        totalCount,
-        hasNext: skip + progressEntries.length < totalCount,
-        hasPrev: parseInt(page) > 1
-      }
+      pagination: paginationInfo
     });
 
   } catch (error) {
