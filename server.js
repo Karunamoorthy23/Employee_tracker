@@ -341,6 +341,93 @@ const requireAuth = (req, res, next) => {
 const ADMIN_USERNAME = process.env.LOGIN_USERNAME || 'Login@proEduvate';
 const ADMIN_PASSWORD = process.env.LOGIN_PASSWORD || 'Pass@proEduvate';
 
+// Get summary statistics - Protected route
+app.get('/api/employee-progress/stats', requireAuth, async (req, res) => {
+  try {
+    if (!checkConnection()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection is not available.'
+      });
+    }
+
+    const filter = buildFilter(req.query);
+    
+    const [total, completed, inProgress, pending] = await Promise.all([
+      EmployeeProgress.countDocuments(filter),
+      EmployeeProgress.countDocuments({ ...filter, workStatus: 'Completed' }),
+      EmployeeProgress.countDocuments({ ...filter, workStatus: 'In Progress' }),
+      EmployeeProgress.countDocuments({ ...filter, workStatus: 'Pending' })
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        total,
+        completed,
+        inProgress,
+        pending
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Helper function to build MongoDB filter object from query parameters
+const buildFilter = (query) => {
+  const { search, domain, techLead, status, dateFrom, dateTo } = query;
+  let filter = {};
+  
+  if (search) {
+    filter.$or = [
+      { internName: { $regex: search, $options: 'i' } },
+      { internEmail: { $regex: search, $options: 'i' } },
+      { internId: { $regex: search, $options: 'i' } }
+    ];
+  }
+  
+  if (domain && domain !== 'all') {
+    filter.internDomain = domain;
+  }
+  
+  if (techLead && techLead !== 'all') {
+    filter.techLeadName = techLead;
+  }
+
+  if (status && status !== 'all') {
+    filter.workStatus = status;
+  }
+
+  // Date filtering
+  if ((dateFrom && dateFrom.trim() !== '') || (dateTo && dateTo.trim() !== '')) {
+    filter.date = {};
+    if (dateFrom && dateFrom.trim() !== '') {
+      const fromDate = new Date(dateFrom);
+      if (!isNaN(fromDate.getTime())) {
+        filter.date.$gte = fromDate;
+      }
+    }
+    if (dateTo && dateTo.trim() !== '') {
+      const toDate = new Date(dateTo);
+      if (!isNaN(toDate.getTime())) {
+        toDate.setHours(23, 59, 59, 999);
+        filter.date.$lte = toDate;
+      }
+    }
+    // If we added filter.date but no valid dates were provided, remove it
+    if (Object.keys(filter.date).length === 0) {
+      delete filter.date;
+    }
+  }
+  
+  return filter;
+};
+
 // API Routes
 // Submit employee progress
 app.post('/api/employee-progress', upload.array('fileAttachment', 10), async (req, res) => {
@@ -437,6 +524,7 @@ app.post('/api/employee-progress', upload.array('fileAttachment', 10), async (re
   }
 });
 
+
 // Get all employee progress (for admin dashboard) - Protected route
 app.get('/api/employee-progress', requireAuth, async (req, res) => {
   try {
@@ -447,27 +535,10 @@ app.get('/api/employee-progress', requireAuth, async (req, res) => {
         message: 'Database connection is not available. Please try again later.'
       });
     }
-    const { search, domain, techLead, page = 1, limit = 10 } = req.query;
     
-    // Build filter object
-    let filter = {};
+    const { page = 1, limit = 40 } = req.query;
+    const filter = buildFilter(req.query);
     
-    if (search) {
-      filter.$or = [
-        { internName: { $regex: search, $options: 'i' } },
-        { internEmail: { $regex: search, $options: 'i' } },
-        { internId: { $regex: search, $options: 'i' } }
-      ];
-    }
-    
-    if (domain && domain !== 'all') {
-      filter.internDomain = domain;
-    }
-    
-    if (techLead && techLead !== 'all') {
-      filter.techLeadName = techLead;
-    }
-
     // Handle 'all' limit to fetch all records
     let queryLimit;
     let skip;
@@ -492,7 +563,6 @@ app.get('/api/employee-progress', requireAuth, async (req, res) => {
     }
     
     const progressEntries = await query;
-
     const totalCount = await EmployeeProgress.countDocuments(filter);
 
     // Calculate pagination info
@@ -532,7 +602,7 @@ app.get('/api/employee-progress', requireAuth, async (req, res) => {
 });
 
 // Get single progress entry by ID - Protected route
-app.get('/api/employee-progress/:id', requireAuth, async (req, res) => {
+app.get('/api/employee-progress/:id([0-9a-fA-F]{24})', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -567,7 +637,7 @@ app.get('/api/employee-progress/:id', requireAuth, async (req, res) => {
 });
 
 // Delete a specific file from a progress entry - Protected route
-app.delete('/api/employee-progress/:id/files/:fileName', requireAuth, async (req, res) => {
+app.delete('/api/employee-progress/:id([0-9a-fA-F]{24})/files/:fileName', requireAuth, async (req, res) => {
   try {
     const { id, fileName } = req.params;
     

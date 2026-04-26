@@ -11,7 +11,9 @@ let currentFilters = {
     dateTo: ''
 };
 let allSubmissions = [];
-let filteredSubmissions = [];
+let totalPages = 1;
+let totalEntries = 0;
+const itemsPerPage = 40;
 
 // DOM Elements
 const searchInput = document.getElementById('searchInput');
@@ -70,13 +72,14 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
     
     loadSubmissions();
+    loadStats();
     setupEventListeners();
 });
 
 // Setup event listeners
 function setupEventListeners() {
     // Search input
-    searchInput.addEventListener('input', debounce(handleSearch, 300));
+    searchInput.addEventListener('input', debounce(handleSearch, 500));
     
     // Filter toggle
     filterToggleBtn.addEventListener('click', toggleFilters);
@@ -173,16 +176,31 @@ async function loadSubmissions() {
         showLoading(true);
         hideError();
         
-        // Fetch all records by passing limit=all
-        const response = await fetch(`${BASE_URL}api/employee-progress?limit=all`, {
+        // Build query string from filters
+        const params = new URLSearchParams({
+            page: currentPage,
+            limit: itemsPerPage,
+            search: currentFilters.search,
+            domain: currentFilters.domain,
+            techLead: currentFilters.techLead,
+            status: currentFilters.status,
+            dateFrom: currentFilters.dateFrom,
+            dateTo: currentFilters.dateTo
+        });
+
+        const response = await fetch(`${BASE_URL}api/employee-progress?${params.toString()}`, {
             credentials: 'include'
         });
         const result = await response.json();
         
         if (result.success) {
             allSubmissions = result.data;
-            updateStats();
-            applyFilters();
+            if (result.pagination) {
+                totalPages = result.pagination.totalPages;
+                totalEntries = result.pagination.totalCount;
+            }
+            renderTable();
+            renderPagination();
         } else {
             showError(result.message || 'Failed to load submissions');
         }
@@ -191,6 +209,39 @@ async function loadSubmissions() {
         showError('Network error. Please check your connection and try again.');
     } finally {
         showLoading(false);
+    }
+}
+
+// Load statistics from API
+async function loadStats() {
+    try {
+        const params = new URLSearchParams({
+            search: currentFilters.search,
+            domain: currentFilters.domain,
+            techLead: currentFilters.techLead,
+            status: currentFilters.status,
+            dateFrom: currentFilters.dateFrom,
+            dateTo: currentFilters.dateTo
+        });
+
+        const response = await fetch(`${BASE_URL}api/employee-progress/stats?${params.toString()}`, {
+            credentials: 'include'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.success) {
+            const { total, completed, inProgress, pending } = result.data;
+            totalSubmissionsEl.textContent = total || 0;
+            completedTasksEl.textContent = completed || 0;
+            inProgressTasksEl.textContent = inProgress || 0;
+            pendingTasksEl.textContent = pending || 0;
+        } else {
+            console.error('Stats API error:', result.message || response.statusText);
+            if (result.error) console.error('Error details:', result.error);
+        }
+    } catch (error) {
+        console.error('Error loading statistics:', error);
     }
 }
 
@@ -205,7 +256,6 @@ function handleSearch(e) {
 function handleFilterChange(e) {
     const filterType = e.target.id.replace('Filter', '');
     currentFilters[filterType] = e.target.value;
-    currentPage = 1;
     applyFilters();
 }
 
@@ -298,43 +348,9 @@ function formatDateForInput(date) {
 
 // Apply filters and update display
 function applyFilters() {
-    filteredSubmissions = allSubmissions.filter(submission => {
-        const matchesSearch = !currentFilters.search || 
-            submission.internName.toLowerCase().includes(currentFilters.search) ||
-            submission.internEmail.toLowerCase().includes(currentFilters.search) ||
-            submission.internId.toLowerCase().includes(currentFilters.search);
-        
-        const matchesDomain = currentFilters.domain === 'all' || 
-            submission.internDomain === currentFilters.domain;
-        
-        const matchesTechLead = currentFilters.techLead === 'all' || 
-            submission.techLeadName === currentFilters.techLead;
-        
-        const matchesStatus = currentFilters.status === 'all' || 
-            submission.workStatus === currentFilters.status;
-        
-        // Date filtering
-        const submissionDate = new Date(submission.date);
-        const fromDate = currentFilters.dateFrom ? new Date(currentFilters.dateFrom) : null;
-        const toDate = currentFilters.dateTo ? new Date(currentFilters.dateTo) : null;
-        
-        let matchesDate = true;
-        if (fromDate) {
-            matchesDate = matchesDate && submissionDate >= fromDate;
-        }
-        if (toDate) {
-            // Add one day to include the entire "to date"
-            const toDatePlusOne = new Date(toDate);
-            toDatePlusOne.setDate(toDatePlusOne.getDate() + 1);
-            matchesDate = matchesDate && submissionDate < toDatePlusOne;
-        }
-        
-        return matchesSearch && matchesDomain && matchesTechLead && matchesStatus && matchesDate;
-    });
-    
-    updateStats();
-    renderTable();
-    renderPagination();
+    currentPage = 1;
+    loadSubmissions();
+    loadStats();
 }
 
 // Clear all filters
@@ -367,29 +383,12 @@ function clearAllFilters() {
     hideFilters();
 }
 
-// Update statistics
-function updateStats() {
-    const total = filteredSubmissions.length;
-    const completed = filteredSubmissions.filter(s => s.workStatus === 'Completed').length;
-    const inProgress = filteredSubmissions.filter(s => s.workStatus === 'In Progress').length;
-    const pending = filteredSubmissions.filter(s => s.workStatus === 'Pending').length;
-    
-    totalSubmissionsEl.textContent = total;
-    completedTasksEl.textContent = completed;
-    inProgressTasksEl.textContent = inProgress;
-    pendingTasksEl.textContent = pending;
-}
 
 // Render table
 function renderTable() {
-    const itemsPerPage = 10;
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const pageSubmissions = filteredSubmissions.slice(startIndex, endIndex);
-    
     tableBody.innerHTML = '';
     
-    if (pageSubmissions.length === 0) {
+    if (allSubmissions.length === 0) {
         tableBody.innerHTML = `
             <tr>
                 <td colspan="10" style="text-align: center; padding: 40px; color: #64748B;">
@@ -401,7 +400,7 @@ function renderTable() {
         return;
     }
     
-    pageSubmissions.forEach(submission => {
+    allSubmissions.forEach(submission => {
         const row = document.createElement('tr');
         row.innerHTML = `
             <td>${submission.internName}</td>
@@ -424,9 +423,9 @@ function renderTable() {
     });
     
     // Update pagination info
-    const totalPages = Math.ceil(filteredSubmissions.length / itemsPerPage);
-    const startEntry = startIndex + 1;
-    const endEntry = Math.min(endIndex, filteredSubmissions.length);
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const startEntry = totalEntries > 0 ? startIndex + 1 : 0;
+    const endEntry = Math.min(startIndex + allSubmissions.length, totalEntries);
     
     let dateInfo = '';
     if (currentFilters.dateFrom || currentFilters.dateTo) {
@@ -435,14 +434,11 @@ function renderTable() {
         dateInfo = ` (${fromDate} - ${toDate})`;
     }
     
-    paginationInfo.textContent = `Showing ${startEntry}-${endEntry} of ${filteredSubmissions.length} entries${dateInfo}`;
+    paginationInfo.textContent = `Showing ${startEntry}-${endEntry} of ${totalEntries} entries${dateInfo}`;
 }
 
 // Render pagination
 function renderPagination() {
-    const itemsPerPage = 10;
-    const totalPages = Math.ceil(filteredSubmissions.length / itemsPerPage);
-    
     if (totalPages <= 1) {
         pagination.innerHTML = '';
         return;
@@ -452,40 +448,27 @@ function renderPagination() {
     
     // Previous button
     paginationHTML += `
-        <button ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">
+        <button class="pagination-btn ${currentPage === 1 ? 'disabled' : ''}" 
+                onclick="changePage(${currentPage - 1})" 
+                ${currentPage === 1 ? 'disabled' : ''}>
             <i class="fas fa-chevron-left"></i>
+            Previous
         </button>
     `;
     
-    // Page numbers
-    const startPage = Math.max(1, currentPage - 2);
-    const endPage = Math.min(totalPages, currentPage + 2);
-    
-    if (startPage > 1) {
-        paginationHTML += `<button onclick="changePage(1)">1</button>`;
-        if (startPage > 2) {
-            paginationHTML += `<span>...</span>`;
-        }
-    }
-    
-    for (let i = startPage; i <= endPage; i++) {
-        paginationHTML += `
-            <button class="${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">
-                ${i}
-            </button>
-        `;
-    }
-    
-    if (endPage < totalPages) {
-        if (endPage < totalPages - 1) {
-            paginationHTML += `<span>...</span>`;
-        }
-        paginationHTML += `<button onclick="changePage(${totalPages})">${totalPages}</button>`;
-    }
+    // Page indicators
+    paginationHTML += `
+        <div class="pagination-pages">
+            <span class="current-page">Page ${currentPage} of ${totalPages}</span>
+        </div>
+    `;
     
     // Next button
     paginationHTML += `
-        <button ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">
+        <button class="pagination-btn ${currentPage === totalPages ? 'disabled' : ''}" 
+                onclick="changePage(${currentPage + 1})" 
+                ${currentPage === totalPages ? 'disabled' : ''}>
+            Next
             <i class="fas fa-chevron-right"></i>
         </button>
     `;
@@ -495,11 +478,11 @@ function renderPagination() {
 
 // Change page
 function changePage(page) {
-    const totalPages = Math.ceil(filteredSubmissions.length / 10);
     if (page >= 1 && page <= totalPages) {
         currentPage = page;
-        renderTable();
-        renderPagination();
+        loadSubmissions();
+        // Scroll to top of table
+        document.querySelector('.table-section').scrollIntoView({ behavior: 'smooth' });
     }
 }
 

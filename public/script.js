@@ -11,6 +11,14 @@ const errorText = document.getElementById('errorText');
 const fileInput = document.getElementById('fileAttachment');
 const filePreview = document.getElementById('filePreview');
 
+// New Overlay Elements
+const submissionOverlay = document.getElementById('submissionOverlay');
+const successState = document.getElementById('successState');
+const failureState = document.getElementById('failureState');
+const failureMessage = document.getElementById('failureMessage');
+const newSubmissionBtn = document.getElementById('newSubmissionBtn');
+const retryBtn = document.getElementById('retryBtn');
+
 // Initialize BASE_URL and set current date
 document.addEventListener('DOMContentLoaded', async function() {
     // Fetch BASE_URL from server
@@ -250,7 +258,7 @@ form.addEventListener('submit', async function(e) {
         const result = await response.json();
         
         if (result.success) {
-            showSuccessMessage('Progress submitted successfully!');
+            showSuccessState();
             form.reset();
             selectedFiles = []; // Clear our global files array
             filePreview.style.display = 'none';
@@ -262,15 +270,40 @@ form.addEventListener('submit', async function(e) {
             const day = String(now.getDate()).padStart(2, '0');
             document.getElementById('date').value = `${year}-${month}-${day}`;
         } else {
-            showErrorMessage(result.message || 'Failed to submit progress. Please try again.');
+            showFailureState(result.message || 'Failed to submit progress. Please try again.');
         }
     } catch (error) {
         console.error('Error submitting form:', error);
-        showErrorMessage('Network error. Please check your connection and try again.');
+        showFailureState('Network error. Please check your connection and try again.');
     } finally {
         setLoadingState(false);
     }
 });
+
+// New Status Functions
+function showSuccessState() {
+    submissionOverlay.style.display = 'flex';
+    successState.style.display = 'block';
+    failureState.style.display = 'none';
+    document.body.style.overflow = 'hidden'; // Prevent scrolling
+}
+
+function showFailureState(message) {
+    submissionOverlay.style.display = 'flex';
+    successState.style.display = 'none';
+    failureState.style.display = 'block';
+    failureMessage.textContent = message;
+    document.body.style.overflow = 'hidden'; // Prevent scrolling
+}
+
+function closeOverlay() {
+    submissionOverlay.style.display = 'none';
+    document.body.style.overflow = 'auto'; // Restore scrolling
+}
+
+// Overlay Button Listeners
+newSubmissionBtn.addEventListener('click', closeOverlay);
+retryBtn.addEventListener('click', closeOverlay);
 
 // Form validation
 function validateForm() {

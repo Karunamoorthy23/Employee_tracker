@@ -20,7 +20,7 @@ const employeeProgressSchema = new mongoose.Schema({
   internDomain: {
     type: String,
     required: true,
-    enum: ['Full Stack', 'Frontend', 'Backend', 'AIML', 'Product Developer', 'Human Resource Management', 'Database Management', 'Cloud Technologies', 'Cyber Security', 'Data Engineering', 'Data Visualization', 'Testing', 'Others']
+    enum: ['Full Stack', 'Frontend', 'Backend', 'AIML', 'Product Developer', 'Human Resource Management', 'Database Management', 'Cloud Technologies', 'Cyber Security', 'Data Engineering', 'Data Visualization', 'Testing', 'UI/UX' , 'Others']
   },
   date: {
     type: Date,
@@ -29,7 +29,7 @@ const employeeProgressSchema = new mongoose.Schema({
   techLeadName: {
     type: String,
     required: true,
-    enum: ['Balamanikandan', 'Karunamoorthy S', 'Dharshini', 'Dhanush Chakravarthy', 'Gowtham', 'Dowlath Nisha', 'KarunaKaran', 'Sachin', 'Martin']
+    enum: ['Balamanikandan', 'Karunamoorthy S', 'Dharshini', 'Dhanush Chakravarthy', 'Gowtham', 'Dowlath Nisha', 'KarunaKaran', 'Sachin', 'Martin', 'Preethika']
   },
   assignedTask: {
     type: String,
