@@ -32,6 +32,15 @@ const customDateGroup2 = document.getElementById('customDateGroup2');
 const clearFiltersBtn = document.getElementById('clearFilters');
 const applyFiltersBtn = document.getElementById('applyFilters');
 const refreshBtn = document.getElementById('refreshBtn');
+const sendAttendanceMailBtn = document.getElementById('sendAttendanceMailBtn');
+const sendModal = document.getElementById('sendModal');
+const closeSendModal = document.getElementById('closeSendModal');
+const sendStartDate = document.getElementById('sendStartDate');
+const sendEndDate = document.getElementById('sendEndDate');
+const sendDepartment = document.getElementById('sendDepartment');
+const sendRecipientEmail = document.getElementById('sendRecipientEmail');
+const cancelSendBtn = document.getElementById('cancelSendBtn');
+const confirmSendBtn = document.getElementById('confirmSendBtn');
 const loadingSpinner = document.getElementById('loadingSpinner');
 const errorMessage = document.getElementById('errorMessage');
 const errorText = document.getElementById('errorText');
@@ -111,6 +120,14 @@ function setupEventListeners() {
     
     // Refresh button
     refreshBtn.addEventListener('click', loadSubmissions);
+    if (sendAttendanceMailBtn) {
+        sendAttendanceMailBtn.addEventListener('click', openSendModal);
+    }
+
+    // Send modal listeners
+    if (closeSendModal) closeSendModal.addEventListener('click', closeSendModalHandler);
+    if (cancelSendBtn) cancelSendBtn.addEventListener('click', closeSendModalHandler);
+    if (confirmSendBtn) confirmSendBtn.addEventListener('click', confirmSendFromModal);
     
     // Modal close
     closeModal.addEventListener('click', closeViewModal);
@@ -723,6 +740,105 @@ function getFilePreview(fileAttachment, submissionId) {
 function showLoading(show) {
     loadingSpinner.style.display = show ? 'block' : 'none';
     refreshBtn.disabled = show;
+}
+
+async function sendAttendanceMail() {
+    // Kept for backwards compatibility; prefer the modal path
+    openSendModal();
+}
+
+async function openSendModal() {
+    try {
+        // Populate departments from preview API
+        const params = new URLSearchParams();
+        const response = await fetch(`${BASE_URL}api/admin/attendance-mail/preview?${params.toString()}`, { credentials: 'include' });
+        const result = await response.json();
+        if (response.ok && result.success) {
+            const departments = result.data.departments || [];
+            // Clear existing options
+            sendDepartment.innerHTML = '';
+            const allOpt = document.createElement('option');
+            allOpt.value = 'all';
+            allOpt.textContent = 'All Departments';
+            sendDepartment.appendChild(allOpt);
+            departments.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.departmentName;
+                opt.textContent = `${d.departmentName} (${d.studentCount} students)`;
+                sendDepartment.appendChild(opt);
+            });
+        }
+    } catch (err) {
+        console.error('Failed to load departments for send modal:', err);
+    }
+
+    // Default dates: last 14 days
+    const today = new Date();
+    const end = formatDateForInput(today);
+    const start = formatDateForInput(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 13));
+    sendStartDate.value = start;
+    sendEndDate.value = end;
+
+    if (sendModal) {
+        sendModal.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+function closeSendModalHandler(e) {
+    e && e.preventDefault();
+    if (sendModal) {
+        sendModal.style.display = 'none';
+        document.body.style.overflow = 'auto';
+    }
+}
+
+async function confirmSendFromModal() {
+    // Gather inputs
+    const startDate = sendStartDate.value || '';
+    const endDate = sendEndDate.value || '';
+    const department = sendDepartment.value === 'all' ? '' : sendDepartment.value;
+    const recipientEmailVal = sendRecipientEmail.value || '';
+
+    if (!confirm('Send attendance report for the selected options now?')) return;
+
+    try {
+        confirmSendBtn.disabled = true;
+        confirmSendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+
+        const body = {};
+        if (startDate) body.startDate = startDate;
+        if (endDate) body.endDate = endDate;
+        if (department) body.department = department;
+        if (recipientEmailVal) body.recipientEmail = recipientEmailVal;
+
+        const response = await fetch(`${BASE_URL}api/admin/attendance-mail/send`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        const result = await response.json();
+        if (response.ok && result.success) {
+            const failedCount = result.data.failedCount || 0;
+            const sentCount = result.data.sentCount || 0;
+            if (failedCount > 0) {
+                showSuccess(`Sent ${sentCount} report(s) with ${failedCount} failure(s).`);
+            } else {
+                showSuccess(`Sent ${sentCount} attendance report(s) successfully.`);
+            }
+            closeSendModalHandler();
+        } else {
+            showError(result.message || 'Failed to send attendance mail.');
+        }
+    } catch (err) {
+        console.error('Error sending from modal:', err);
+        showError('Network error while sending attendance mail.');
+    } finally {
+        confirmSendBtn.disabled = false;
+        confirmSendBtn.innerHTML = 'Send';
+    }
 }
 
 function showError(message) {
