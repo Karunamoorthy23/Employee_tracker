@@ -1,6 +1,8 @@
-require('dotenv').config();
+require('dotenv').config({ override: true });
 const express = require('express');
 const mongoose = require('mongoose');
+const nodemailer = require('nodemailer');
+const cron = require('node-cron');
 const multer = require('multer');
 const path = require('path');
 const cors = require('cors');
@@ -8,6 +10,7 @@ const fs = require('fs');
 const session = require('express-session');
 
 const EmployeeProgress = require('./models/EmployeeProgress');
+const AttendanceMailLog = require('./models/AttendanceMailLog');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -340,6 +343,587 @@ const requireAuth = (req, res, next) => {
 // Admin credentials from environment variables
 const ADMIN_USERNAME = process.env.LOGIN_USERNAME || 'Login@proEduvate';
 const ADMIN_PASSWORD = process.env.LOGIN_PASSWORD || 'Pass@proEduvate';
+
+const parseJsonEnv = (value, fallback = {}) => {
+  if (!value || !value.trim()) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch (error) {
+    console.warn('⚠️ Failed to parse JSON environment value. Using fallback.');
+    return fallback;
+  }
+};
+
+const escapeHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const formatDateOnly = (date) => new Date(date).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric'
+});
+
+const toStartOfDay = (date) => {
+  const normalizedDate = new Date(date);
+  normalizedDate.setHours(0, 0, 0, 0);
+  return normalizedDate;
+};
+
+const toEndOfDay = (date) => {
+  const normalizedDate = new Date(date);
+  normalizedDate.setHours(23, 59, 59, 999);
+  return normalizedDate;
+};
+
+const addDays = (date, days) => {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+};
+
+const getDateDifferenceInDays = (startDate, endDate) => {
+  const start = toStartOfDay(startDate).getTime();
+  const end = toStartOfDay(endDate).getTime();
+  const diff = Math.max(0, Math.round((end - start) / (24 * 60 * 60 * 1000)));
+  return diff + 1;
+};
+
+const parseDateInput = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsedDate = new Date(value);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+};
+
+const departmentHeadEmails = parseJsonEnv(process.env.DEPARTMENT_HEAD_EMAILS, {});
+const smtpHost = process.env.SMTP_HOST;
+const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
+const smtpSecure = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true';
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
+const smtpFrom = process.env.SMTP_FROM || smtpUser;
+
+const createMailer = () => {
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpSecure,
+    auth: {
+      user: smtpUser,
+      pass: smtpPass
+    }
+  });
+};
+
+const mailer = createMailer();
+
+const normalizeDepartmentKey = (value) => String(value || '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, '');
+
+const departmentEmailLookup = Object.entries(departmentHeadEmails).reduce((lookup, [departmentName, email]) => {
+  lookup[normalizeDepartmentKey(departmentName)] = email;
+  return lookup;
+}, {});
+
+const buildAttendanceWindow = async (options = {}) => {
+  const requestedStartDate = parseDateInput(options.startDate);
+  const requestedEndDate = parseDateInput(options.endDate);
+
+  if (requestedStartDate || requestedEndDate) {
+    return {
+      periodStart: requestedStartDate ? toStartOfDay(requestedStartDate) : null,
+      periodEnd: requestedEndDate ? toEndOfDay(requestedEndDate) : toEndOfDay(new Date()),
+      latestLog: null,
+      windowLabel: 'custom'
+    };
+  }
+
+  const periodEnd = toEndOfDay(new Date());
+  const periodStart = toStartOfDay(addDays(periodEnd, -13));
+
+  return {
+    periodStart,
+    periodEnd,
+    latestLog: null,
+    windowLabel: 'last-14-days'
+  };
+};
+
+const buildAttendanceReport = async (periodStart, periodEnd) => {
+  const allRecords = await EmployeeProgress.find({})
+    .select('internName internEmail internId internDomain date')
+    .sort({ internDomain: 1, internName: 1, date: 1 })
+    .lean();
+
+  const windowRecords = await EmployeeProgress.find({
+    date: {
+      $gte: periodStart,
+      $lte: periodEnd
+    }
+  })
+    .select('internName internEmail internId internDomain date')
+    .sort({ internDomain: 1, internName: 1, date: 1 })
+    .lean();
+
+  const departmentsMap = new Map();
+  const possibleAttendanceDays = getDateDifferenceInDays(periodStart, periodEnd);
+
+  const getStudentKey = (record) => record.internId || record.internEmail || record.internName;
+
+  for (const record of allRecords) {
+    const departmentName = record.internDomain || 'Unknown';
+    const studentKey = getStudentKey(record);
+
+    if (!departmentsMap.has(departmentName)) {
+      departmentsMap.set(departmentName, new Map());
+    }
+
+    const departmentStudents = departmentsMap.get(departmentName);
+
+    if (!departmentStudents.has(studentKey)) {
+      departmentStudents.set(studentKey, {
+        internName: record.internName,
+        internEmail: record.internEmail,
+        internId: record.internId,
+        internDomain: departmentName,
+        attendanceDates: new Set(),
+        submissionCount: 0,
+        lastSubmissionDate: null,
+        firstSeenDate: record.date ? new Date(record.date) : null
+      });
+    }
+  }
+
+  for (const record of windowRecords) {
+    const departmentName = record.internDomain || 'Unknown';
+    const studentKey = getStudentKey(record);
+    const dateKey = new Date(record.date).toISOString().slice(0, 10);
+
+    if (!departmentsMap.has(departmentName)) {
+      departmentsMap.set(departmentName, new Map());
+    }
+
+    const departmentStudents = departmentsMap.get(departmentName);
+
+    if (!departmentStudents.has(studentKey)) {
+      departmentStudents.set(studentKey, {
+        internName: record.internName,
+        internEmail: record.internEmail,
+        internId: record.internId,
+        internDomain: departmentName,
+        attendanceDates: new Set(),
+        submissionCount: 0
+      });
+    }
+
+    const student = departmentStudents.get(studentKey);
+    student.attendanceDates.add(dateKey);
+    student.submissionCount += 1;
+    student.lastSubmissionDate = record.date ? new Date(record.date) : student.lastSubmissionDate;
+    if (!student.firstSeenDate && record.date) {
+      student.firstSeenDate = new Date(record.date);
+    }
+  }
+
+  return [...departmentsMap.entries()].map(([departmentName, studentsMap]) => {
+    const students = [...studentsMap.values()]
+      .map((student) => ({
+        ...student,
+        attendanceDates: [...student.attendanceDates].sort(),
+        attendanceDays: student.attendanceDates.size,
+        attendanceRate: possibleAttendanceDays > 0 ? Math.round((student.attendanceDates.size / possibleAttendanceDays) * 100) : 0,
+        attendanceStatus: student.attendanceDates.size === 0
+          ? 'No Attendance'
+          : Math.round((student.attendanceDates.size / possibleAttendanceDays) * 100) >= 75
+            ? 'Good Attendance'
+            : 'Low Attendance'
+      }))
+      .sort((left, right) => {
+        const statusOrder = {
+          'No Attendance': 0,
+          'Low Attendance': 1,
+          'Good Attendance': 2
+        };
+
+        const statusDiff = statusOrder[left.attendanceStatus] - statusOrder[right.attendanceStatus];
+        if (statusDiff !== 0) {
+          return statusDiff;
+        }
+
+        return left.internName.localeCompare(right.internName);
+      });
+
+    const noAttendanceStudents = students.filter((student) => student.attendanceStatus === 'No Attendance');
+    const lowAttendanceStudents = students.filter((student) => student.attendanceStatus === 'Low Attendance');
+    const goodAttendanceStudents = students.filter((student) => student.attendanceStatus === 'Good Attendance');
+    const averageAttendanceRate = students.length > 0
+      ? Math.round(students.reduce((sum, student) => sum + student.attendanceRate, 0) / students.length)
+      : 0;
+
+    return {
+      departmentName,
+      recipientEmail: departmentEmailLookup[normalizeDepartmentKey(departmentName)] || '',
+      students,
+      studentCount: students.length,
+      totalAttendanceDays: students.reduce((sum, student) => sum + student.attendanceDays, 0),
+      totalSubmissions: students.reduce((sum, student) => sum + student.submissionCount, 0),
+      averageAttendanceRate,
+      possibleAttendanceDays,
+      noAttendanceCount: noAttendanceStudents.length,
+      lowAttendanceCount: lowAttendanceStudents.length,
+      goodAttendanceCount: goodAttendanceStudents.length,
+      noAttendanceStudents,
+      lowAttendanceStudents,
+      goodAttendanceStudents,
+      anomalies: [...noAttendanceStudents, ...lowAttendanceStudents]
+    };
+  }).sort((left, right) => left.departmentName.localeCompare(right.departmentName));
+};
+
+const renderAttendanceEmailHtml = (departmentReport, periodStart, periodEnd) => {
+  const studentRows = departmentReport.students.length > 0
+    ? departmentReport.students.map((student) => `
+      <tr>
+        <td>${escapeHtml(student.internName)}</td>
+        <td>${escapeHtml(student.internId)}</td>
+        <td>${escapeHtml(student.internEmail)}</td>
+        <td>${student.attendanceDays}</td>
+        <td>${escapeHtml(student.attendanceDates.join(', ') || 'No attendance in this period')}</td>
+        <td>${student.attendanceRate}%</td>
+        <td>${escapeHtml(student.attendanceStatus)}</td>
+        <td>${student.submissionCount}</td>
+      </tr>
+    `).join('')
+    : `
+      <tr>
+        <td colspan="8" style="text-align:center;padding:18px;color:#64748b;">No attendance records were found for this period.</td>
+      </tr>
+    `;
+
+  const anomalyRows = departmentReport.anomalies.length > 0
+    ? departmentReport.anomalies.map((student) => `
+      <tr>
+        <td>${escapeHtml(student.internName)}</td>
+        <td>${escapeHtml(student.internId)}</td>
+        <td>${student.attendanceDays}</td>
+        <td>${student.attendanceRate}%</td>
+        <td>${escapeHtml(student.attendanceStatus)}</td>
+        <td>${escapeHtml(student.attendanceDates.join(', ') || 'No attendance in this period')}</td>
+      </tr>
+    `).join('')
+    : `
+      <tr>
+        <td colspan="6" style="text-align:center;padding:18px;color:#64748b;">No attendance anomalies found.</td>
+      </tr>
+    `;
+
+  return `
+    <div style="font-family:Arial,sans-serif;color:#0f172a;line-height:1.5;">
+      <h2 style="margin:0 0 12px;">Department Attendance Report - ${escapeHtml(departmentReport.departmentName)}</h2>
+      <p style="margin:0 0 18px;">Period: ${escapeHtml(formatDateOnly(periodStart))} to ${escapeHtml(formatDateOnly(periodEnd))}</p>
+      <p style="margin:0 0 18px;">Attendance days are counted from distinct progress submission dates in the selected window. The roster includes all known students in this department, so no-attendance cases are visible too.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin:0 0 18px;">
+        <div style="padding:12px 16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;"><strong>${departmentReport.studentCount}</strong><br/>Students</div>
+        <div style="padding:12px 16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;"><strong>${departmentReport.averageAttendanceRate}%</strong><br/>Average Attendance</div>
+        <div style="padding:12px 16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;"><strong>${departmentReport.goodAttendanceCount}</strong><br/>Good</div>
+        <div style="padding:12px 16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;"><strong>${departmentReport.lowAttendanceCount}</strong><br/>Low</div>
+        <div style="padding:12px 16px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;"><strong>${departmentReport.noAttendanceCount}</strong><br/>No Attendance</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Student</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">ID</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Email</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Attendance Days</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Attendance Dates</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Attendance %</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Status</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Submissions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${studentRows}
+        </tbody>
+      </table>
+      <h3 style="margin:24px 0 10px;">Anomalies</h3>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Student</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">ID</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Days</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Attendance %</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Status</th>
+            <th style="padding:10px;border:1px solid #e2e8f0;text-align:left;">Dates</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${anomalyRows}
+        </tbody>
+      </table>
+      <p style="margin:18px 0 0;color:#475569;">Summary: ${departmentReport.studentCount} students, ${departmentReport.totalAttendanceDays} attendance days, ${departmentReport.totalSubmissions} submissions.</p>
+    </div>
+  `;
+};
+
+const renderAttendanceEmailText = (departmentReport, periodStart, periodEnd) => {
+  const lines = [
+    `Department Attendance Report - ${departmentReport.departmentName}`,
+    `Period: ${formatDateOnly(periodStart)} to ${formatDateOnly(periodEnd)}`,
+    'Attendance days are counted from distinct progress submission dates in the selected window.',
+    `Students: ${departmentReport.studentCount}`,
+    `Average attendance: ${departmentReport.averageAttendanceRate}%`,
+    `Good attendance: ${departmentReport.goodAttendanceCount}`,
+    `Low attendance: ${departmentReport.lowAttendanceCount}`,
+    `No attendance: ${departmentReport.noAttendanceCount}`,
+    ''
+  ];
+
+  if (departmentReport.students.length === 0) {
+    lines.push('No attendance records were found for this period.');
+    return lines.join('\n');
+  }
+
+  for (const student of departmentReport.students) {
+    lines.push(`${student.internName} | ${student.internId} | ${student.internEmail} | ${student.attendanceDays} day(s) | ${student.attendanceRate}% | ${student.attendanceStatus} | ${student.attendanceDates.join(', ') || 'No attendance in this period'} | ${student.submissionCount} submission(s)`);
+  }
+
+  lines.push('');
+  lines.push(`Summary: ${departmentReport.studentCount} students, ${departmentReport.totalAttendanceDays} attendance days, ${departmentReport.totalSubmissions} submissions.`);
+  lines.push('');
+  lines.push('Anomalies:');
+  if (departmentReport.anomalies.length === 0) {
+    lines.push('None');
+  } else {
+    for (const student of departmentReport.anomalies) {
+      lines.push(`${student.internName} | ${student.internId} | ${student.attendanceRate}% | ${student.attendanceStatus} | ${student.attendanceDates.join(', ') || 'No attendance in this period'}`);
+    }
+  }
+
+  return lines.join('\n');
+};
+
+const getDepartmentMailSummary = async (options = {}) => {
+  const { periodStart, periodEnd, latestLog } = await buildAttendanceWindow(options);
+  const departments = await buildAttendanceReport(periodStart, periodEnd);
+  const configuredDepartments = Object.keys(departmentHeadEmails);
+  const missingRecipients = departments
+    .filter((department) => !department.recipientEmail)
+    .map((department) => department.departmentName);
+
+  return {
+    periodStart,
+    periodEnd,
+    latestLog,
+    departments,
+    configuredDepartments,
+    missingRecipients,
+    smtpReady: !!mailer
+  };
+};
+
+app.get('/api/admin/attendance-mail/preview', requireAuth, async (req, res) => {
+  try {
+    if (!checkConnection()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection is not available.'
+      });
+    }
+
+    const summary = await getDepartmentMailSummary({
+      startDate: req.query.startDate,
+      endDate: req.query.endDate
+    });
+
+    res.json({
+      success: true,
+      data: summary
+    });
+  } catch (error) {
+    console.error('Error generating attendance preview:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate attendance preview.'
+    });
+  }
+});
+
+app.post('/api/admin/attendance-mail/send', requireAuth, async (req, res) => {
+  try {
+    if (!checkConnection()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection is not available.'
+      });
+    }
+
+    if (!mailer) {
+      return res.status(503).json({
+        success: false,
+        message: 'SMTP is not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM in .env.'
+      });
+    }
+
+    // Use performSend to handle the send logic so it can be reused by scheduler
+    const options = {
+      startDate: req.body?.startDate || req.query?.startDate,
+      endDate: req.body?.endDate || req.query?.endDate,
+      department: req.body?.department || req.query?.department,
+      recipientEmail: req.body?.recipientEmail || req.query?.recipientEmail
+    };
+
+    const result = await performSend(options, req.session?.adminUser || ADMIN_USERNAME);
+
+    if (!result.success) {
+      return res.status(400).json({ success: false, message: result.message || 'Failed to send attendance reports.' });
+    }
+
+    res.json({ success: true, message: result.message, data: result.data });
+  } catch (error) {
+    console.error('Error sending attendance mail:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send attendance mail.'
+    });
+  }
+});
+
+// performSend: reusable send function used by manual API and scheduler
+async function performSend(options = {}, sentBy = 'system') {
+  try {
+    if (!checkConnection()) {
+      return { success: false, message: 'Database connection is not available.' };
+    }
+
+    if (!mailer) {
+      return { success: false, message: 'SMTP is not configured.' };
+    }
+
+    const summary = await getDepartmentMailSummary({ startDate: options.startDate, endDate: options.endDate });
+
+    if (!summary || summary.departments.length === 0) {
+      return { success: false, message: 'No attendance records were found for the selected period.' };
+    }
+
+    // Filter departments based on options.department or recipientEmail
+    let departmentsToSend = summary.departments;
+    if (options.department && String(options.department).trim() !== '') {
+      const deptKey = String(options.department).trim();
+      departmentsToSend = departmentsToSend.filter(d => d.departmentName === deptKey || normalizeDepartmentKey(d.departmentName) === normalizeDepartmentKey(deptKey));
+    }
+
+    if (options.recipientEmail && String(options.recipientEmail).trim() !== '') {
+      // If recipientEmail provided, send only to that email for selected department(s)
+      departmentsToSend = departmentsToSend.map(d => ({ ...d, recipientEmail: String(options.recipientEmail).trim() }));
+    }
+
+    // If no recipient email configured for selected departments, fail
+    const withRecipients = departmentsToSend.filter(d => d.recipientEmail && d.recipientEmail.trim() !== '');
+
+    if (withRecipients.length === 0) {
+      return { success: false, message: 'No recipient emails found for the selected department(s).' };
+    }
+
+    const sendResults = await Promise.allSettled(withRecipients.map(async (department) => {
+      const html = renderAttendanceEmailHtml(department, summary.periodStart, summary.periodEnd);
+      const text = renderAttendanceEmailText(department, summary.periodStart, summary.periodEnd);
+      const subject = `Attendance Report - ${department.departmentName} (${formatDateOnly(summary.periodStart)} to ${formatDateOnly(summary.periodEnd)})`;
+
+      await mailer.sendMail({ from: smtpFrom, to: department.recipientEmail, subject, text, html });
+
+      return { departmentName: department.departmentName, recipientEmail: department.recipientEmail };
+    }));
+
+    const successfulSends = [];
+    const failedSends = [];
+
+    sendResults.forEach((result, index) => {
+      const department = withRecipients[index];
+      if (result.status === 'fulfilled') {
+        successfulSends.push(result.value);
+      } else {
+        failedSends.push({ departmentName: department.departmentName, recipientEmail: department.recipientEmail, message: result.reason?.message || 'Failed to send email' });
+      }
+    });
+
+    const logStatus = failedSends.length === 0 ? 'success' : successfulSends.length > 0 ? 'partial' : 'failed';
+
+    await AttendanceMailLog.create({
+      reportType: 'department-attendance',
+      periodStart: summary.periodStart,
+      periodEnd: summary.periodEnd,
+      sentAt: new Date(),
+      recipientCount: successfulSends.length,
+      recipientEmails: successfulSends.map((entry) => entry.recipientEmail),
+      departmentCount: summary.departments.length,
+      status: logStatus,
+      sentBy: sentBy,
+      summary: {
+        configuredDepartments: summary.configuredDepartments.length,
+        missingRecipients: summary.missingRecipients
+      }
+    });
+
+    return {
+      success: true,
+      message: failedSends.length === 0 ? 'Attendance reports sent successfully.' : 'Attendance reports sent with some failures.',
+      data: {
+        sentCount: successfulSends.length,
+        failedCount: failedSends.length,
+        missingRecipients: summary.missingRecipients,
+        failedSends,
+        periodStart: summary.periodStart,
+        periodEnd: summary.periodEnd
+      }
+    };
+  } catch (error) {
+    console.error('performSend error:', error);
+    return { success: false, message: 'Failed to send attendance reports.' };
+  }
+}
+
+// Scheduler: every Friday at 09:00 server time, but only send if last successful send was >= 13 days ago
+try {
+  cron.schedule('0 9 * * 5', async () => {
+    try {
+      console.log('Scheduler: Friday job running - checking if send is needed');
+      const lastLog = await AttendanceMailLog.findOne({ reportType: 'department-attendance', status: 'success' }).sort({ sentAt: -1 }).lean();
+      const now = Date.now();
+      if (lastLog && lastLog.sentAt) {
+        const diffDays = Math.floor((now - new Date(lastLog.sentAt).getTime()) / (24 * 60 * 60 * 1000));
+        if (diffDays < 13) {
+          console.log(`Scheduler: Last successful send was ${diffDays} day(s) ago. Skipping (need >=13 days).`);
+          return;
+        }
+      }
+
+      const result = await performSend({}, 'scheduler');
+      console.log('Scheduler run result:', result);
+    } catch (err) {
+      console.error('Scheduler error:', err);
+    }
+  }, { timezone: 'Asia/Kolkata' });
+  console.log('Scheduler: configured to run every Friday at 09:00 IST (Asia/Kolkata)');
+} catch (err) {
+  console.error('Failed to configure scheduler:', err);
+}
 
 // Get summary statistics - Protected route
 app.get('/api/employee-progress/stats', requireAuth, async (req, res) => {

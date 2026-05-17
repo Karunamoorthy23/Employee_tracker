@@ -117,8 +117,8 @@ You can customize the application by setting these environment variables:
 
 ```bash
 # Server Configuration
-PORT=3001                           # Server port (default: 3001)
-BASE_URL=http://localhost:3001/     # Base URL for the application (default: http://localhost:3001/)
+PORT=3000                           # Server port (default: 3000)
+BASE_URL=http://localhost:3000/     # Base URL for the application (default: http://localhost:3000/)
 
 # MongoDB Configuration (Choose one option)
 # Option 1: Direct MongoDB URI
@@ -129,6 +129,18 @@ CLUSTERNAME=your-cluster-name
 USERNAME=your-username
 PASSWORD=your-password
 PROVIDER=mongodb.net  # Optional, defaults to mongodb.net for Atlas
+
+# Attendance Mail Configuration
+# Map each department/domain name to its department head email address.
+DEPARTMENT_HEAD_EMAILS={"Full Stack":"fullstack.head@company.com","Frontend":"frontend.head@company.com"}
+
+# SMTP Settings for sending the reports
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=notifications@company.com
+SMTP_PASS=your-app-password
+SMTP_FROM="Proeduvate Attendance <notifications@company.com>"
 ```
 
 **Note**: Create a `.env` file in the project root to set these variables. The application will automatically load them on startup.
@@ -137,6 +149,8 @@ PROVIDER=mongodb.net  # Optional, defaults to mongodb.net for Atlas
 - **Local MongoDB**: Use `MONGODB_URI=mongodb://localhost:27017/Proeduvate`
 - **Cloud MongoDB**: Use `CLUSTERNAME`, `USERNAME`, `PASSWORD`, and optionally `PROVIDER`
 - **Direct URI**: Use `MONGODB_URI` with your complete connection string
+
+The attendance mail system groups daily progress submissions by department and emails each configured department head with the attendance days for every student from the last successful mail run to the current date.
 
 ### File Upload Settings
 - **Maximum file size**: 10MB

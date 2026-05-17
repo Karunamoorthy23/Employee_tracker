@@ -199,6 +199,10 @@
                 <div class="table-header">
                     <h2>Employee Progress Submissions</h2>
                     <div class="table-actions">
+                            <button id="sendAttendanceMailBtn" class="btn-refresh">
+                                <i class="fas fa-envelope"></i>
+                                Send 2-Week Report
+                            </button>
                         <button id="refreshBtn" class="btn-refresh">
                             <i class="fas fa-sync-alt"></i>
                             Refresh
@@ -268,6 +272,42 @@
             </div>
             <div class="modal-body" id="modalBody">
                 <!-- Content will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Send Attendance Modal -->
+    <div id="sendModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Send Attendance Report</h2>
+                <button class="modal-close" id="closeSendModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="sendModalBody">
+                <div class="filter-group">
+                    <label for="sendStartDate">Start Date</label>
+                    <input type="date" id="sendStartDate">
+                </div>
+                <div class="filter-group">
+                    <label for="sendEndDate">End Date</label>
+                    <input type="date" id="sendEndDate">
+                </div>
+                <div class="filter-group">
+                    <label for="sendDepartment">Department</label>
+                    <select id="sendDepartment">
+                        <option value="all">All Departments</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="sendRecipientEmail">Override Recipient Email (optional)</label>
+                    <input type="email" id="sendRecipientEmail" placeholder="example@domain.com">
+                </div>
+                <div class="filters-actions">
+                    <button id="cancelSendBtn" class="btn-clear">Cancel</button>
+                    <button id="confirmSendBtn" class="btn-apply">Send</button>
+                </div>
             </div>
         </div>
     </div>
